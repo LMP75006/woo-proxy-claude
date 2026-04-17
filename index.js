@@ -15,7 +15,7 @@ app.use((req, res, next) => {
 const WOO_URL    = process.env.WOO_URL;
 const WOO_KEY    = process.env.WOO_KEY;
 const WOO_SECRET = process.env.WOO_SECRET;
-const CLAUDE_SECRET = process.env.CLAUDE_SECRET;
+const CLAUDE_SECRET = process.env.CLAUDE_SECRET || "lmp2026secret";
 
 function auth(req, res, next) {
   const token = req.headers["x-claude-secret"];
