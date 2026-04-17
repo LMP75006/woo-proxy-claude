@@ -27,9 +27,11 @@ function auth(req, res, next) {
 }
 
 function woo(path, method = "GET", data = null) {
+  const url = `${WOO_URL}/wp-json/wc/v3${path}`;
+  console.log("Calling:", url);
   return axios({
     method,
-    url: `${WOO_URL}/wp-json/wc/v3${path}`,
+    url,
     auth: { username: WOO_KEY, password: WOO_SECRET },
     data: method !== "GET" ? data : undefined,
     params: method === "GET" && data ? data : undefined,
