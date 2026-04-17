@@ -13,126 +13,123 @@ app.use((req, res, next) => {
 });
 
 const WOO_URL = (process.env.WOO_URL || "").trim();
-const WOO_KEY    = process.env.WOO_KEY;
-const WOO_SECRET = process.env.WOO_SECRET;
-const CLAUDE_SECRET = process.env.CLAUDE_SECRET || "lmp2026secret";
-console.log("WOO_URL:", JSON.stringify(WOO_URL));
+const WOO_KEY = (process.env.WOO_KEY || "").trim();
+const WOO_SECRET = (process.env.WOO_SECRET || "").trim();
+const CLAUDE_SECRET = (process.env.CLAUDE_SECRET || "lmp2026secret").trim();
 
 function auth(req, res, next) {
   const token = req.headers["x-claude-secret"];
-  if (!CLAUDE_SECRET || token !== CLAUDE_SECRET) {
+  if (token !== CLAUDE_SECRET) {
     return res.status(401).json({ error: "Non autorisé" });
   }
   next();
 }
 
-function woo(path, method = "GET", data = null) {
-  const url = `${WOO_URL}/wp-json/wc/v3${path}`;
-  console.log("Calling:", url);
+function woo(path, method, data) {
+  method = method || "GET";
+  data = data || null;
+  var url = WOO_URL + "/wp-json/wc/v3" + path;
   return axios({
-    method,
-    url,
+    method: method,
+    url: url,
     auth: { username: WOO_KEY, password: WOO_SECRET },
     data: method !== "GET" ? data : undefined,
     params: method === "GET" && data ? data : undefined,
   });
 }
 
-app.get("/", (req, res) => res.json({ status: "WooCommerce Proxy opérationnel" }));
-
-app.get("/api/dashboard", auth, async (req, res) => {
-  try {
-    const url = `${WOO_URL}/wp-json/wc/v3/orders?per_page=1`;
-    console.log("Fetching:", url);
-    const r = await axios.get(url, {
-      auth: { username: WOO_KEY, password: WOO_SECRET }
-    });
-    res.json({ success: true, data: r.data });
-  } catch (e) {
-    console.log("Error:", e.message, e.config?.url);
-    res.status(500).json({ error: e.message, url: e.config?.url });
-  }
+app.get("/", function(req, res) {
+  res.json({ status: "WooCommerce Proxy operationnel" });
 });
+
+app.get("/api/dashboard", auth, function(req, res) {
+  Promise.all([
+    woo("/orders?per_page=5&orderby=date&order=desc"),
+    woo("/products?per_page=1"),
+    woo("/customers?per_page=1"),
+    woo("/reports/sales?period=month"),
+    woo("/reports/sales?period=year"),
+  ]).then(function(results) {
     res.json({
-      dernières_commandes: orders.data,
-      total_produits: products.headers["x-wp-total"],
-      total_clients: customers.headers["x-wp-total"],
-      ventes_mois: salesMonth.data[0] || {},
-      ventes_année: salesYear.data[0] || {},
+      dernieres_commandes: results[0].data,
+      total_produits: results[1].headers["x-wp-total"],
+      total_clients: results[2].headers["x-wp-total"],
+      ventes_mois: results[3].data[0] || {},
+      ventes_annee: results[4].data[0] || {},
     });
-  } catch (e) {
-    res.status(500).json({ error: e.message, detail: e.response?.data });
-  }
+  }).catch(function(e) {
+    res.status(500).json({ error: e.message });
+  });
 });
 
-app.get("/api/orders", auth, async (req, res) => {
-  try {
-    const { status = "any", per_page = 20, page = 1 } = req.query;
-    const r = await woo(`/orders?status=${status}&per_page=${per_page}&page=${page}`);
-    res.json({ total: r.headers["x-wp-total"], commandes: r.data });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/api/orders", auth, function(req, res) {
+  var status = req.query.status || "any";
+  var per_page = req.query.per_page || 20;
+  var page = req.query.page || 1;
+  woo("/orders?status=" + status + "&per_page=" + per_page + "&page=" + page)
+    .then(function(r) {
+      res.json({ total: r.headers["x-wp-total"], commandes: r.data });
+    }).catch(function(e) {
+      res.status(500).json({ error: e.message });
+    });
 });
 
-app.get("/api/products", auth, async (req, res) => {
-  try {
-    const { per_page = 20, page = 1, search = "", category = "" } = req.query;
-    const r = await woo(`/products?per_page=${per_page}&page=${page}&search=${encodeURIComponent(search)}&category=${category}`);
-    res.json({ total: r.headers["x-wp-total"], produits: r.data });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/api/products", auth, function(req, res) {
+  var per_page = req.query.per_page || 20;
+  var page = req.query.page || 1;
+  var search = req.query.search || "";
+  woo("/products?per_page=" + per_page + "&page=" + page + "&search=" + encodeURIComponent(search))
+    .then(function(r) {
+      res.json({ total: r.headers["x-wp-total"], produits: r.data });
+    }).catch(function(e) {
+      res.status(500).json({ error: e.message });
+    });
 });
 
-app.get("/api/products/:id", auth, async (req, res) => {
-  try {
-    const r = await woo(`/products/${req.params.id}`);
-    res.json(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/api/products/:id", auth, function(req, res) {
+  woo("/products/" + req.params.id)
+    .then(function(r) { res.json(r.data); })
+    .catch(function(e) { res.status(500).json({ error: e.message }); });
 });
 
-app.put("/api/products/:id", auth, async (req, res) => {
-  try {
-    const r = await woo(`/products/${req.params.id}`, "PUT", req.body);
-    res.json({ success: true, produit: r.data });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.put("/api/products/:id", auth, function(req, res) {
+  woo("/products/" + req.params.id, "PUT", req.body)
+    .then(function(r) { res.json({ success: true, produit: r.data }); })
+    .catch(function(e) { res.status(500).json({ error: e.message }); });
 });
 
-app.get("/api/categories", auth, async (req, res) => {
-  try {
-    const r = await woo("/products/categories?per_page=100");
-    res.json({ catégories: r.data });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/api/customers", auth, function(req, res) {
+  var per_page = req.query.per_page || 20;
+  var page = req.query.page || 1;
+  woo("/customers?per_page=" + per_page + "&page=" + page)
+    .then(function(r) {
+      res.json({ total: r.headers["x-wp-total"], clients: r.data });
+    }).catch(function(e) {
+      res.status(500).json({ error: e.message });
+    });
 });
 
-app.get("/api/customers", auth, async (req, res) => {
-  try {
-    const { per_page = 20, page = 1 } = req.query;
-    const r = await woo(`/customers?per_page=${per_page}&page=${page}`);
-    res.json({ total: r.headers["x-wp-total"], clients: r.data });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/api/reports/sales", auth, function(req, res) {
+  var period = req.query.period || "month";
+  woo("/reports/sales?period=" + period)
+    .then(function(r) { res.json(r.data); })
+    .catch(function(e) { res.status(500).json({ error: e.message }); });
 });
 
-app.get("/api/reports/sales", auth, async (req, res) => {
-  try {
-    const { period = "month", date_min, date_max } = req.query;
-    const params = date_min ? `?date_min=${date_min}&date_max=${date_max}` : `?period=${period}`;
-    const r = await woo(`/reports/sales${params}`);
-    res.json(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/api/reports/top-sellers", auth, function(req, res) {
+  var period = req.query.period || "month";
+  woo("/reports/top_sellers?period=" + period)
+    .then(function(r) { res.json(r.data); })
+    .catch(function(e) { res.status(500).json({ error: e.message }); });
 });
 
-app.get("/api/reports/top-sellers", auth, async (req, res) => {
-  try {
-    const { period = "month" } = req.query;
-    const r = await woo(`/reports/top_sellers?period=${period}`);
-    res.json(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+app.get("/api/coupons", auth, function(req, res) {
+  woo("/coupons?per_page=50")
+    .then(function(r) { res.json({ coupons: r.data }); })
+    .catch(function(e) { res.status(500).json({ error: e.message }); });
 });
 
-app.get("/api/coupons", auth, async (req, res) => {
-  try {
-    const r = await woo("/coupons?per_page=50");
-    res.json({ coupons: r.data });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+var PORT = process.env.PORT || 3000;
+app.listen(PORT, function() {
+  console.log("Proxy WooCommerce demarre sur le port " + PORT);
 });
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Proxy WooCommerce démarré sur le port ${PORT}`));
