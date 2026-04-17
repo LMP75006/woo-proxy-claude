@@ -13,6 +13,9 @@ app.use((req, res, next) => {
 });
 
 const WOO_URL = (process.env.WOO_URL || "").trim();
+console.log("WOO_URL:", JSON.stringify(WOO_URL));
+console.log("WOO_KEY:", JSON.stringify((WOO_KEY||"").substring(0,8)+"..."));
+console.log("WOO_SECRET:", JSON.stringify((WOO_SECRET||"").substring(0,8)+"..."));
 const WOO_KEY    = process.env.WOO_KEY;
 const WOO_SECRET = process.env.WOO_SECRET;
 const CLAUDE_SECRET = process.env.CLAUDE_SECRET || "lmp2026secret";
