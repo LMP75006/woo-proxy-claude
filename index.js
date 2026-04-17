@@ -1,23 +1,22 @@
-/**
- * Proxy WooCommerce pour Claude
- * Déployer sur Railway — toutes les routes sont sécurisées par CLAUDE_SECRET
- */
-
 const express = require("express");
 const axios = require("axios");
-const cors = require("cors");
 const app = express();
 
 app.use(express.json());
-app.use(cors());
 
-// ─── CONFIG ────────────────────────────────────────────────────────────────
-const WOO_URL    = process.env.WOO_URL;          // https://laboutiquedelamaisonpropre.fr
-const WOO_KEY    = process.env.WOO_KEY;          // ck_...
-const WOO_SECRET = process.env.WOO_SECRET;       // cs_...
-const CLAUDE_SECRET = process.env.CLAUDE_SECRET; // clé secrète que tu inventes
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, x-claude-secret, Authorization");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
 
-// ─── MIDDLEWARE AUTH ────────────────────────────────────────────────────────
+const WOO_URL    = process.env.WOO_URL;
+const WOO_KEY    = process.env.WOO_KEY;
+const WOO_SECRET = process.env.WOO_SECRET;
+const CLAUDE_SECRET = process.env.CLAUDE_SECRET;
+
 function auth(req, res, next) {
   const token = req.headers["x-claude-secret"];
   if (!CLAUDE_SECRET || token !== CLAUDE_SECRET) {
@@ -26,22 +25,18 @@ function auth(req, res, next) {
   next();
 }
 
-// ─── CLIENT WOO ────────────────────────────────────────────────────────────
 function woo(path, method = "GET", data = null) {
   return axios({
     method,
     url: `${WOO_URL}/wp-json/wc/v3${path}`,
     auth: { username: WOO_KEY, password: WOO_SECRET },
-    data,
+    data: method !== "GET" ? data : undefined,
     params: method === "GET" && data ? data : undefined,
   });
 }
 
-// ─── ROUTES ────────────────────────────────────────────────────────────────
-
 app.get("/", (req, res) => res.json({ status: "WooCommerce Proxy opérationnel" }));
 
-// Dashboard — stats globales
 app.get("/api/dashboard", auth, async (req, res) => {
   try {
     const [orders, products, customers, salesMonth, salesYear] = await Promise.all([
@@ -53,17 +48,16 @@ app.get("/api/dashboard", auth, async (req, res) => {
     ]);
     res.json({
       dernières_commandes: orders.data,
-      total_produits: orders.headers["x-wp-total"] || "?",
-      total_clients: customers.headers["x-wp-total"] || "?",
+      total_produits: products.headers["x-wp-total"],
+      total_clients: customers.headers["x-wp-total"],
       ventes_mois: salesMonth.data[0] || {},
       ventes_année: salesYear.data[0] || {},
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message, detail: e.response?.data });
   }
 });
 
-// Commandes
 app.get("/api/orders", auth, async (req, res) => {
   try {
     const { status = "any", per_page = 20, page = 1 } = req.query;
@@ -72,16 +66,14 @@ app.get("/api/orders", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Produits — lecture
 app.get("/api/products", auth, async (req, res) => {
   try {
     const { per_page = 20, page = 1, search = "", category = "" } = req.query;
-    const r = await woo(`/products?per_page=${per_page}&page=${page}&search=${search}&category=${category}`);
+    const r = await woo(`/products?per_page=${per_page}&page=${page}&search=${encodeURIComponent(search)}&category=${category}`);
     res.json({ total: r.headers["x-wp-total"], produits: r.data });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Produit — détail
 app.get("/api/products/:id", auth, async (req, res) => {
   try {
     const r = await woo(`/products/${req.params.id}`);
@@ -89,7 +81,6 @@ app.get("/api/products/:id", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Produit — mise à jour (titre, description, prix, SEO)
 app.put("/api/products/:id", auth, async (req, res) => {
   try {
     const r = await woo(`/products/${req.params.id}`, "PUT", req.body);
@@ -97,7 +88,6 @@ app.put("/api/products/:id", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Catégories
 app.get("/api/categories", auth, async (req, res) => {
   try {
     const r = await woo("/products/categories?per_page=100");
@@ -105,7 +95,6 @@ app.get("/api/categories", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Clients
 app.get("/api/customers", auth, async (req, res) => {
   try {
     const { per_page = 20, page = 1 } = req.query;
@@ -114,7 +103,6 @@ app.get("/api/customers", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Rapport ventes par période
 app.get("/api/reports/sales", auth, async (req, res) => {
   try {
     const { period = "month", date_min, date_max } = req.query;
@@ -124,7 +112,6 @@ app.get("/api/reports/sales", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Top produits vendus
 app.get("/api/reports/top-sellers", auth, async (req, res) => {
   try {
     const { period = "month" } = req.query;
@@ -133,7 +120,6 @@ app.get("/api/reports/top-sellers", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Coupons
 app.get("/api/coupons", auth, async (req, res) => {
   try {
     const r = await woo("/coupons?per_page=50");
@@ -141,6 +127,5 @@ app.get("/api/coupons", auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── DÉMARRAGE ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Proxy WooCommerce démarré sur le port ${PORT}`));
