@@ -42,13 +42,17 @@ app.get("/", (req, res) => res.json({ status: "WooCommerce Proxy opérationnel" 
 
 app.get("/api/dashboard", auth, async (req, res) => {
   try {
-    const [orders, products, customers, salesMonth, salesYear] = await Promise.all([
-      woo("/orders?per_page=5&orderby=date&order=desc"),
-      woo("/products?per_page=1"),
-      woo("/customers?per_page=1"),
-      woo("/reports/sales?period=month"),
-      woo("/reports/sales?period=year"),
-    ]);
+    const url = `${WOO_URL}/wp-json/wc/v3/orders?per_page=1`;
+    console.log("Fetching:", url);
+    const r = await axios.get(url, {
+      auth: { username: WOO_KEY, password: WOO_SECRET }
+    });
+    res.json({ success: true, data: r.data });
+  } catch (e) {
+    console.log("Error:", e.message, e.config?.url);
+    res.status(500).json({ error: e.message, url: e.config?.url });
+  }
+});
     res.json({
       dernières_commandes: orders.data,
       total_produits: products.headers["x-wp-total"],
